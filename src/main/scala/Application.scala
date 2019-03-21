@@ -5,13 +5,15 @@ import jp.co.nri.nefs.tool.models.Dialog
 
 import scala.collection.JavaConverters._
 import org.apache.commons.io.FileUtils
+
 import scala.collection.mutable.ListBuffer
+import scala.util.matching.Regex
 
 
 object Application {
 
   /**
-    * キー：dialogNameとhandlerのタプル
+    * キー：handlerとdialogNameのタプル
     * バリュー：Dialogクラスのリスト。追加する必要があるためmutableなListBufferを用いる
     */
   private var dialogMap = Map[(String,Option[String]), ListBuffer[Dialog]]()
@@ -36,12 +38,23 @@ object Application {
     val regex(datetimeStr, logLevel, message, thread, clazz) = line
     LineInfo.apply(datetimeStr, logLevel, message, thread, clazz)
   }
-
-  private def getContents(message: String): String = {
+  private def getDialogName(message: String): Option[String] = {
     lazy val regex = """\[(.*)\].*""".r
-    val regex(contents) = message
-    contents
+    regexOption(regex, message)
   }
+
+  private def getButtonAction(message: String) : Option[String] = {
+    lazy val regex = """.*(\(.*\)).*""".r
+    regexOption(regex, message)
+  }
+
+  private def regexOption(regex: Regex, message: String):Option[String] = {
+    message match {
+     case regex(contents) => return Some(contents)
+     case _ => return None
+    }
+  }
+
 //run D:\tmp\TradeSheet_OMS_TKY_FID2CAD332_356435_20190315090918535.log
   def main(args: Array[String]): Unit = {
     if (args.size == 0){
@@ -60,8 +73,7 @@ object Application {
     //val regex = """(2[0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]\s[0-9][0-9]:[0-9][0-9]:[0-9][0-9]\.[0-9][0-9][0-9])\s\[(.*)\]\[TradeSheet\](.*)\[(.*)\]\[(j.c.*)\]$""".r
     //val messageRe = """\[(.*)\].*""".r
     //val format = new java.text.SimpleDateFormat("yyyy-MM-dd hh:mm:ss.SSS")
-    var handler : Option[String] = None
-
+    var handler : String = ""
     var handlerStartTime = new Date()
     var handlerEndTime = new Date()
 
@@ -69,25 +81,35 @@ object Application {
     ite.asScala.foreach(line => {
       val lineInfo = getLineInfo(line)
       //val regex(datetimeStr, logLevel, message, thread, clazz) = line
-      if (lineInfo.message contains "Handler start.") {
+      if ((lineInfo.message contains "Handler start.") || (lineInfo.message contains "Action start.")) {
         handlerStartTime = lineInfo.datetime
-        handler = Some(lineInfo.clazz)
+        handler = lineInfo.clazz
       }
-      else if (lineInfo.message contains "Dialog opend."){
-        val dialogName = getContents(lineInfo.message)
-      //else if ("Dialog opend.".equals(message)) {
+      //[New Basket]Dialog opened.[main][j.c.n.n.o.r.p.d.b.NewBasketDialog$1]
+      //[TradeSheet]Opened.[main][j.c.n.n.o.r.p.d.c.QuestionDialog]
+      else if ((lineInfo.message contains "Dialog opened.") || (lineInfo.message contains "Opened.")){
+        val dialogName = getDialogName(lineInfo.message)
+      //else if ("Dialog opened.".equals(message)) {
         handlerEndTime = lineInfo.datetime
         val startupTime = handlerEndTime.getTime - handlerStartTime.getTime
-        val dialog = Dialog.apply(dialogName, handler, None, fileInfo.userName,
+        val dialog = Dialog.apply(handler, dialogName, None, None, fileInfo.userName,
           fileInfo.tradeDate, lineInfo.datetime, startupTime)
         println(s"dialog = $dialog")
         //handlerを初期化
-        handler = None
-        val key = (dialogName, handler)
+        handler = ""
+        val key = (handler, dialogName)
         dialogMap.get(key) match {
           case Some(buf) => buf += dialog
           case None => dialogMap += (key -> ListBuffer(dialog))
         }
+      } else if (lineInfo.message contains "Button event ends") {
+        val action = getButtonAction(lineInfo.message)
+        val key = (handler, getDialogName(lineInfo.message))
+        dialogMap.get(key) match {
+          case Some(buf) => buf.update(buf.length-1, buf.last.copy(action = action))
+          case None => println("Error")
+        }
+
       }
 
       //println(s.substring(0,23))
@@ -103,5 +125,7 @@ object Application {
 //      println(d)
     })
     ite.close
+
+    println(dialogMap)
   }
 }

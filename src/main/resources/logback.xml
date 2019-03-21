@@ -1,0 +1,82 @@
+<configuration>
+    <!--
+    <configuration debug="true"> と代わりに書くと
+    - 設定ファイルが見つかったかどうか
+    - 設定ファイルのXML文法が適格かどうか
+    の結果も出力される。
+     -->
+    <property name="ConsoleLevel" value="INFO" />
+    <!--コンソールへの出力設定 name属性の値はユニークであれば何でもいい-->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <target>System.out</target>
+        <!-- INFO だけしかこの設定でログを出力しないようにfilterを設定-->
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>${ConsoleLevel}</level> <!-- 上で指定したpropertyを使う。(value属性の値である "INFO" が返る)-->
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        <encoder>
+            <!-- ログのフォーマットを指定-->
+            <pattern>time:%d{MM/dd HH:mm:ss} --- level:%-5level --- logger[%thread]:%logger --- message:%msg%n</pattern>
+            <!--
+                %d{<format>}: ログが出力された時間
+                %-5level: ログのレベル[trace, debug, info, warn, error]を5つ分のスペースを使って書き出す。(e.g. infoは4文字なので最後に1つスペースが空く。)
+                %logger: ログが発生した場所
+                %thread: ログが発生したスレッド
+                %msg: ログのメッセージ
+                %n: 改行
+                ※ 出力例は後述
+            -->
+        </encoder>
+    </appender>
+    <!-- conversionRuleの設定。conversionWordで指定したワードをpatternの所で使うと、色付きのログレベルが出力される。
+         　　(play.apiのクラスなので、playでのみ使用可能)
+         -->
+    <conversionRule conversionWord="coloredLevel" converterClass="play.api.Logger$ColoredLevel" />
+    <!-- ファイル出力用の設定 ※ class属性が上のCONSOLEのappenderと違うことに注目 -->
+    <appender name="FILE_LOG" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <!-- WARN以上 (WARNとERROR) のレベルのログにだけこの設定を使用するようにfilterを設定-->
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>WARN</level>
+        </filter>
+        <!-- ローテーションの設定。ログの出力先ファイルの場所もここで指定-->
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>/var/log/info-%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern> <!-- ファイル名を指定 -->
+            <!--
+                - 毎日 rollover(新しいファイルを作ってそこを出力先に変えること)する。
+                - 上のfileNamePatternの所で "yyyy-MM-dd" を "yyyy-MM" だけにしたら、1ヶ月でrolloverになる。
+                - 逆に "yyyy-MM-dd HH" だと１時間ごとにrollover
+                - 上のfileNamePatternの%i: その日の何番目のファイルか(0からスタート) を示す数字。同じ日にファイルサイズが100MBを超えてrolloverしたらカウントアップする。
+                - 上のようにfileNamePatternの内容の最後に".gz" もしくは ".zip"をつけると圧縮されたファイルができる。
+            -->
+            <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+                <!-- ファイルサイズが100MBを超えてもrolloverする-->
+                <maxFileSize>100MB</maxFileSize>
+            </timeBasedFileNamingAndTriggeringPolicy>
+        </rollingPolicy>
+        <encoder>
+            <!-- 上のCONSOLEと同じようにログのフォーマットを指定。上のconversionRuleで指定したcoloredLevelを使っている。-->
+            <pattern>time:%d{MM/dd HH:mm:ss} --- level:%-5coloredLevel --- logger[%thread]:%logger --- message:%msg%n</pattern>
+        </encoder>
+    </appender>
+    <!-- 非同期でログ出力をするように設定。細かい設定はCONSOLEを参照-->
+    <appender name="ASYNC_CONSOLE" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="CONSOLE"/>
+    </appender>
+    <logger name="slick.ast" level="WARN" /> <!-- slick.astから出力されたログをWARNレベルとして扱う -->
+    <logger name="slick.jdbc" level="OFF" /> <!-- slick.jdbcから出力されたログを表示しない -->
+    <!-- com.mchange.v2.c3p0から出力されたログの設定 -->
+    <logger name="com.mchange.v2.c3p0">
+        <level value="WARN"/> <!-- レベルはWARN -->
+        <appender-ref ref="FILE_LOG"/> <!-- FILE_LOG (上のappenderタグのname属性で判別)の設定を使用 -->
+        <appender-ref ref="CONSOLE"/> <!-- CONSOLEの設定を使用。ただしCONSOLEはfilterでINFOしか受け付けないので、結局使われない。-->
+    </logger>
+    <!-- WARN以上のログ設定-->
+    <root level="WARN">
+        <appender-ref ref="FILE_LOG"/> <!-- FILE_LOG (上のappenderタグのname属性で判別)の設定を使用。 -->
+    </root>
+    <!-- INFO以上のログ設定-->
+    <root level="INFO">
+        <appender-ref ref="ASYNC_CONSOLE"/> <!-- ASYNC_CONSOLE (上のappenderタグのname属性で判別)の設定を使用。INFO以上はコンソールへのログ出力を非同期に行うようになる。 -->
+    </root>
+</configuration>

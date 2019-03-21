@@ -1,4 +1,5 @@
 import java.io.File
+import java.sql.Timestamp
 import java.util.Date
 
 import jp.co.nri.nefs.tool.models.Dialog
@@ -8,15 +9,41 @@ import org.apache.commons.io.FileUtils
 
 import scala.collection.mutable.ListBuffer
 import scala.util.matching.Regex
+import com.typesafe.scalalogging.LazyLogging
+
+import slick.jdbc.H2Profile.api._
+import scala.concurrent.ExecutionContext.Implicits.global
+
+import scala.concurrent.Await
+import scala.concurrent.duration.Duration
+
+import scala.collection.mutable.ArrayBuffer
+
+object Application extends LazyLogging{
+
+  class DialogDetail(tag: Tag) extends Table[Dialog](tag, "DIALOG_DETAIL"){
+//    case class Dialog(handler: String, dialogName: Option[String], action: Option[String],
+    //                    destinationType: Option[String], userName: String, tradeDate: String, time: Date, startupTime: Long)
+    def handler = column[String]("HANDLER")
+    def dialogName = column[Option[String]]("DIALOG_NAME")
+    def action = column[Option[String]]("ACTION")
+    def destinationType = column[Option[String]]("DESTINATION_TYPE")
+    def userName = column[String]("USER_NAME")
+    def tradeDate = column[String]("TRADE_DATE")
+    def time = column[Timestamp]("TIME")
+    def startupTime = column[Long]("STARTUP_TIME")
+    def * = (handler, dialogName, action, destinationType, userName, tradeDate, time, startupTime) <> (Dialog.tupled, Dialog.unapply)
+  }
+
+  val details = TableQuery[DialogDetail]
 
 
-object Application {
 
   /**
-    * キー：handlerとdialogNameのタプル
+    * キー：dialogName
     * バリュー：Dialogクラスのリスト。追加する必要があるためmutableなListBufferを用いる
     */
-  private var dialogMap = Map[(String,Option[String]), ListBuffer[Dialog]]()
+  private var dialogMap = Map[Option[String], ListBuffer[Dialog]]()
 
   private case class FileInfo(env: String, computer: String, userName: String, startTime: String){
     val tradeDate = startTime.take(8)
@@ -30,7 +57,7 @@ object Application {
   private case class LineInfo(datetimeStr: String, logLevel: String, message: String,
                               thread: String, clazz: String){
     lazy val format = new java.text.SimpleDateFormat("yyyy-MM-dd hh:mm:ss.SSS")
-    val datetime = format.parse(datetimeStr)
+    val datetime = new Timestamp(format.parse(datetimeStr).getTime)
   }
 
   private def getLineInfo(line: String): LineInfo = {
@@ -44,7 +71,7 @@ object Application {
   }
 
   private def getButtonAction(message: String) : Option[String] = {
-    lazy val regex = """.*(\(.*\)).*""".r
+    lazy val regex = """.*\((.*)\).*""".r
     regexOption(regex, message)
   }
 
@@ -77,11 +104,12 @@ object Application {
     var handlerStartTime = new Date()
     var handlerEndTime = new Date()
 
+
     //var dialog = Dialog.apply()
     ite.asScala.foreach(line => {
       val lineInfo = getLineInfo(line)
       //val regex(datetimeStr, logLevel, message, thread, clazz) = line
-      if ((lineInfo.message contains "Handler start.") || (lineInfo.message contains "Action start.")) {
+      if (lineInfo.message contains "Handler start.") {
         handlerStartTime = lineInfo.datetime
         handler = lineInfo.clazz
       }
@@ -95,17 +123,17 @@ object Application {
         val dialog = Dialog.apply(handler, dialogName, None, None, fileInfo.userName,
           fileInfo.tradeDate, lineInfo.datetime, startupTime)
         println(s"dialog = $dialog")
-        //handlerを初期化
-        handler = ""
-        val key = (handler, dialogName)
-        dialogMap.get(key) match {
+        //たとえばNewOrderListのDialogがOpenされた後にSelect Basketが起動するケースは
+        //handelerをNewOrderListとする
+        handler = dialogName.getOrElse("")
+        dialogMap.get(dialogName) match {
           case Some(buf) => buf += dialog
-          case None => dialogMap += (key -> ListBuffer(dialog))
+          case None => dialogMap += (dialogName -> ListBuffer(dialog))
         }
       } else if (lineInfo.message contains "Button event ends") {
+        val dialogName = getDialogName(lineInfo.message)
         val action = getButtonAction(lineInfo.message)
-        val key = (handler, getDialogName(lineInfo.message))
-        dialogMap.get(key) match {
+        dialogMap.get(dialogName) match {
           case Some(buf) => buf.update(buf.length-1, buf.last.copy(action = action))
           case None => println("Error")
         }
@@ -127,5 +155,34 @@ object Application {
     ite.close
 
     println(dialogMap)
+    //logger.info("abc")
+
+    val a = for ((k, v) <- dialogMap) yield v.last
+
+    val db = Database.forConfig("h2mem1")
+    try {
+      val setup = DBIO.seq(
+        details.schema.create,
+        //suppliers += (101, "Acme, Inc.",      "99 Market Street", "Groundsville", "CA", "95199"),
+        details ++= a
+      )
+      println("ddd")
+
+      val setupFuture = db.run(setup)
+      val resultFuture = setupFuture.flatMap { _ =>
+        println("abcd")
+        db.run(details.result).map(_.foreach {
+          //case class Dialog(handler: String, dialogName: Option[String], action: Option[String],
+          //                  destinationType: Option[String], userName: String, tradeDate: String, time: Timestamp, startupTime: Long)
+          case Dialog(handler, dialogName, action, destinationType, userName, tradeDate, time, startupTime) =>
+            println(dialogName)
+          case _ => println("error")
+        })
+      }
+
+    } finally db.close
+    println("end")
+
+
   }
 }

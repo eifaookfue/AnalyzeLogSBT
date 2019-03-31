@@ -21,6 +21,7 @@ import scala.collection.mutable.ArrayBuffer
 
 object Application extends LazyLogging{
 
+
   class DialogDetail(tag: Tag) extends Table[Dialog](tag, "DIALOG_DETAIL"){
 //    case class Dialog(handler: String, dialogName: Option[String], action: Option[String],
     //                    destinationType: Option[String], userName: String, tradeDate: String, time: Date, startupTime: Long)
@@ -36,8 +37,6 @@ object Application extends LazyLogging{
   }
 
   val details = TableQuery[DialogDetail]
-
-
 
   /**
     * キー：dialogName
@@ -158,19 +157,18 @@ object Application extends LazyLogging{
     //logger.info("abc")
 
     val a = for ((k, v) <- dialogMap) yield v.last
-
+    println(s"a=$a")
     val db = Database.forConfig("h2mem1")
+
     try {
       val setup = DBIO.seq(
         details.schema.create,
         //suppliers += (101, "Acme, Inc.",      "99 Market Street", "Groundsville", "CA", "95199"),
         details ++= a
       )
-      println("ddd")
 
       val setupFuture = db.run(setup)
       val resultFuture = setupFuture.flatMap { _ =>
-        println("abcd")
         db.run(details.result).map(_.foreach {
           //case class Dialog(handler: String, dialogName: Option[String], action: Option[String],
           //                  destinationType: Option[String], userName: String, tradeDate: String, time: Timestamp, startupTime: Long)
@@ -179,6 +177,7 @@ object Application extends LazyLogging{
           case _ => println("error")
         })
       }
+      Await.result(resultFuture, Duration.Inf)
 
     } finally db.close
     println("end")

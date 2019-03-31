@@ -19,6 +19,8 @@ import scala.concurrent.duration.Duration
 
 import scala.collection.mutable.ArrayBuffer
 
+//TODO 2019/03/31 Completeの場合、Button Pressedの前にDialog名が表示されない。
+//GetDialogNameの引数にClazzを追加し、DialogがNoneの場合Clazzを利用
 object Application extends LazyLogging{
 
 
@@ -115,7 +117,14 @@ object Application extends LazyLogging{
       //[New Basket]Dialog opened.[main][j.c.n.n.o.r.p.d.b.NewBasketDialog$1]
       //[TradeSheet]Opened.[main][j.c.n.n.o.r.p.d.c.QuestionDialog]
       else if ((lineInfo.message contains "Dialog opened.") || (lineInfo.message contains "Opened.")){
-        val dialogName = getDialogName(lineInfo.message)
+        val dialogName = if (lineInfo.message contains "Dialog opened.") {
+          getDialogName(lineInfo.message)
+        } else {
+          //Completeのときは[TradeSheet]Opened.[main][j.c.n.n.o.r.p.d.c.QuestionDialog]
+          //といった感じなので、clazzをdialogNameとする
+          Some(lineInfo.clazz)
+        }
+
       //else if ("Dialog opened.".equals(message)) {
         handlerEndTime = lineInfo.datetime
         val startupTime = handlerEndTime.getTime - handlerStartTime.getTime
@@ -129,7 +138,8 @@ object Application extends LazyLogging{
           case Some(buf) => buf += dialog
           case None => dialogMap += (dialogName -> ListBuffer(dialog))
         }
-      } else if (lineInfo.message contains "Button event ends") {
+      }
+      else if (lineInfo.message contains "Button event ends") {
         val dialogName = getDialogName(lineInfo.message)
         val action = getButtonAction(lineInfo.message)
         dialogMap.get(dialogName) match {
@@ -181,6 +191,7 @@ object Application extends LazyLogging{
 
     } finally db.close
     println("end")
+
 
 
   }
